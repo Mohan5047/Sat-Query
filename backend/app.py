@@ -51,6 +51,16 @@ def health_check():
 def get_registered_tools():
     return {"tools": agent.registry.list_tools()}
 
+def _path_to_b64(img_path):
+    if not img_path or not Path(img_path).exists():
+        return None
+    try:
+        arr, _ = read_image_and_metadata(img_path)
+        rgb = normalize_to_rgb_uint8(arr)
+        return array_to_base64_png(rgb)
+    except Exception:
+        return None
+
 @app.get("/api/samples")
 def get_samples():
     """Returns catalog of pre-loaded benchmark datasets."""
@@ -61,8 +71,9 @@ def get_samples():
             "category": "SINGLE_OPTICAL",
             "mode": "SINGLE",
             "image1_path": str(SAMPLE_DATA_DIR / "single_optical" / "cartosat_optical_scene.tif"),
-            "image1_preview": str(SAMPLE_DATA_DIR / "single_optical" / "cartosat_optical_scene.png"),
+            "image1_preview": _path_to_b64(SAMPLE_DATA_DIR / "single_optical" / "cartosat_optical_scene.png"),
             "image2_path": None,
+            "image2_preview": None,
             "description": "Multi-spectral optical image containing urban built-up fabric, coastal water bodies, forest canopy, and airport runway.",
             "suggested_queries": [
                 "Describe the land-cover and major objects visible in this image.",
@@ -77,8 +88,9 @@ def get_samples():
             "category": "SINGLE_SAR",
             "mode": "SINGLE",
             "image1_path": str(SAMPLE_DATA_DIR / "single_sar" / "risat_sar_backscatter.tif"),
-            "image1_preview": str(SAMPLE_DATA_DIR / "single_sar" / "risat_sar_backscatter.png"),
+            "image1_preview": _path_to_b64(SAMPLE_DATA_DIR / "single_sar" / "risat_sar_backscatter.png"),
             "image2_path": None,
+            "image2_preview": None,
             "description": "Synthetic Aperture Radar (SAR) backscatter image demonstrating microwave scattering, double-bounce built-up return, and specular water absorption.",
             "suggested_queries": [
                 "Describe the microwave backscatter patterns and surface structures visible.",
@@ -92,9 +104,9 @@ def get_samples():
             "category": "BITEMPORAL",
             "mode": "BITEMPORAL",
             "image1_path": str(SAMPLE_DATA_DIR / "bitemporal_pairs" / "urban_change_2021_t1.tif"),
-            "image1_preview": str(SAMPLE_DATA_DIR / "bitemporal_pairs" / "urban_change_2021_t1.png"),
+            "image1_preview": _path_to_b64(SAMPLE_DATA_DIR / "bitemporal_pairs" / "urban_change_2021_t1.png"),
             "image2_path": str(SAMPLE_DATA_DIR / "bitemporal_pairs" / "urban_change_2024_t2.tif"),
-            "image2_preview": str(SAMPLE_DATA_DIR / "bitemporal_pairs" / "urban_change_2024_t2.png"),
+            "image2_preview": _path_to_b64(SAMPLE_DATA_DIR / "bitemporal_pairs" / "urban_change_2024_t2.png"),
             "description": "Spatially coregistered bi-temporal pair capturing 3-year urban expansion, infrastructure addition, and agricultural clearing.",
             "suggested_queries": [
                 "What changed between these two dates, and where did the change occur?",
@@ -109,9 +121,9 @@ def get_samples():
             "category": "CROSSMODAL",
             "mode": "CROSSMODAL",
             "image1_path": str(SAMPLE_DATA_DIR / "optical_sar_pairs" / "cartosat2s_optical_coreg.tif"),
-            "image1_preview": str(SAMPLE_DATA_DIR / "optical_sar_pairs" / "cartosat2s_optical_coreg.png"),
+            "image1_preview": _path_to_b64(SAMPLE_DATA_DIR / "optical_sar_pairs" / "cartosat2s_optical_coreg.png"),
             "image2_path": str(SAMPLE_DATA_DIR / "optical_sar_pairs" / "risat1a_sar_coreg.tif"),
-            "image2_preview": str(SAMPLE_DATA_DIR / "optical_sar_pairs" / "risat1a_sar_coreg.png"),
+            "image2_preview": _path_to_b64(SAMPLE_DATA_DIR / "optical_sar_pairs" / "risat1a_sar_coreg.png"),
             "description": "Co-registered Optical and Synthetic Aperture Radar (SAR) pair for joint information extraction and complementary surface characterization.",
             "suggested_queries": [
                 "Use the optical and SAR images together to identify built-up and water-covered regions.",
