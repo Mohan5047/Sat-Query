@@ -1,16 +1,21 @@
-import React, { useState } from 'react';
-import { Eye, SplitSquareVertical, Sliders, Maximize2, Layers, Sparkles } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Eye, SplitSquareVertical, Sliders, Maximize2, Layers, Sparkles, ZoomIn, ZoomOut, RotateCcw, Download, Crosshair } from 'lucide-react';
 
 export default function ImageViewer({
   mode,
   image1Preview,
   image2Preview,
   analysisResult,
-  isLoading
+  isLoading,
+  settings
 }) {
   const [activeLayer, setActiveLayer] = useState('auto');
   const [splitPosition, setSplitPosition] = useState(50);
   const [viewMode, setViewMode] = useState('split'); // 'split' or 'side-by-side'
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [coords, setCoords] = useState(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const canvasRef = useRef(null);
 
   const visualArtifacts = analysisResult?.visual_artifacts || {};
 
@@ -47,8 +52,31 @@ export default function ImageViewer({
   const currentImg1 = getDisplayImage1();
   const currentImg2 = getDisplayImage2();
 
+  // Mouse move coordinate crosshair handler
+  const handleMouseMove = (e) => {
+    if (!canvasRef.current || settings?.coordinate_crosshair === false) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const xPct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const yPct = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+    const pxX = Math.round(xPct * 512);
+    const pxY = Math.round(yPct * 512);
+    setCoords({ x: pxX, y: pxY });
+  };
+
+  const handleMouseLeave = () => {
+    setCoords(null);
+  };
+
+  // Quick download current layer
+  const handleDownloadLayer = () => {
+    const link = document.createElement('a');
+    link.download = `SatQuery_${activeLayer}_layer.png`;
+    link.href = currentImg1;
+    link.click();
+  };
+
   return (
-    <div className="glass-panel rounded-2xl p-5 border border-slate-800 space-y-3 shadow-xl">
+    <div className={`glass-panel rounded-2xl p-5 border border-slate-800 space-y-3 shadow-xl transition-all ${isFullscreen ? 'fixed inset-4 z-50 overflow-auto' : ''}`}>
       {/* Viewer Header & Layer Toggles */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
         <div className="flex items-center space-x-2">
@@ -136,11 +164,57 @@ export default function ImageViewer({
               NDVI Index
             </button>
           )}
+
+          {/* Canvas Tools Toolbar */}
+          <div className="flex items-center gap-1 border-l border-slate-800 pl-2 ml-1">
+            <button
+              onClick={() => setZoomLevel((z) => Math.min(2.5, z + 0.25))}
+              className="p-1 rounded bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800"
+              title="Zoom In"
+            >
+              <ZoomIn className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => setZoomLevel((z) => Math.max(0.75, z - 0.25))}
+              className="p-1 rounded bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800"
+              title="Zoom Out"
+            >
+              <ZoomOut className="w-3.5 h-3.5" />
+            </button>
+            {zoomLevel !== 1 && (
+              <button
+                onClick={() => setZoomLevel(1)}
+                className="p-1 rounded bg-slate-900 text-cyan-400 border border-slate-800"
+                title="Reset Zoom"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+            )}
+            <button
+              onClick={handleDownloadLayer}
+              className="p-1 rounded bg-slate-900 text-slate-400 hover:text-cyan-400 border border-slate-800"
+              title="Export Current Layer Image"
+            >
+              <Download className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => setIsFullscreen(!isFullscreen)}
+              className="p-1 rounded bg-slate-900 text-slate-400 hover:text-white border border-slate-800"
+              title="Toggle Fullscreen"
+            >
+              <Maximize2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Main Visual Display Canvas */}
-      <div className="relative w-full h-80 md:h-[420px] bg-slate-950 rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center">
+      <div
+        ref={canvasRef}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
+        className={`relative w-full ${isFullscreen ? 'h-[75vh]' : 'h-80 md:h-[420px]'} bg-slate-950 rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center`}
+      >
         {isLoading && (
           <div className="absolute inset-0 z-30 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center space-y-3">
             <div className="w-12 h-12 rounded-full border-4 border-cyan-500/30 border-t-cyan-400 animate-spin"></div>
@@ -150,86 +224,102 @@ export default function ImageViewer({
           </div>
         )}
 
-        {/* If Paired Observation (Bi-Temporal or Cross-Modal) */}
-        {mode !== 'SINGLE' && currentImg2 ? (
-          viewMode === 'split' ? (
-            /* Split Comparison Slider */
-            <div className="relative w-full h-full select-none overflow-hidden">
-              <img
-                src={currentImg1}
-                alt="Primary Modality"
-                className="absolute inset-0 w-full h-full object-contain"
-              />
-              <div
-                className="absolute inset-0 overflow-hidden"
-                style={{ width: `${splitPosition}%` }}
-              >
-                <img
-                  src={currentImg2}
-                  alt="Secondary Modality"
-                  className="absolute inset-0 w-full h-full object-contain max-w-none"
-                  style={{ width: '100%', height: '100%' }}
-                />
-              </div>
-
-              {/* Slider Divider Line */}
-              <div
-                className="absolute top-0 bottom-0 w-1 bg-cyan-400 cursor-ew-resize shadow-2xl z-20 flex items-center justify-center"
-                style={{ left: `${splitPosition}%` }}
-              >
-                <div className="w-6 h-6 rounded-full bg-cyan-500 text-slate-950 flex items-center justify-center shadow-lg border-2 border-white text-[10px] font-bold">
-                  ↔
-                </div>
-              </div>
-
-              {/* Range input controller */}
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={splitPosition}
-                onChange={(e) => setSplitPosition(Number(e.target.value))}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-ew-resize z-20"
-              />
-
-              {/* Badges */}
-              <span className="absolute top-3 left-3 bg-slate-900/90 text-cyan-300 text-[11px] font-mono font-bold px-2.5 py-1 rounded-md border border-cyan-500/40 z-10">
-                {mode === 'BITEMPORAL' ? 'T1: Pre-Event' : 'Optical RGB'}
-              </span>
-              <span className="absolute top-3 right-3 bg-slate-900/90 text-indigo-300 text-[11px] font-mono font-bold px-2.5 py-1 rounded-md border border-indigo-500/40 z-10">
-                {mode === 'BITEMPORAL' ? 'T2: Post-Event' : 'SAR Backscatter'}
-              </span>
-            </div>
-          ) : (
-            /* Side-by-Side Dual View */
-            <div className="grid grid-cols-2 w-full h-full gap-2 p-2">
-              <div className="relative rounded-lg overflow-hidden border border-slate-800 bg-slate-900/50">
-                <img src={currentImg1} alt="Left" className="w-full h-full object-contain" />
-                <span className="absolute bottom-2 left-2 bg-slate-900/90 text-cyan-300 text-[10px] font-mono px-2 py-0.5 rounded">
-                  Primary Modality
-                </span>
-              </div>
-              <div className="relative rounded-lg overflow-hidden border border-slate-800 bg-slate-900/50">
-                <img src={currentImg2} alt="Right" className="w-full h-full object-contain" />
-                <span className="absolute bottom-2 right-2 bg-slate-900/90 text-indigo-300 text-[10px] font-mono px-2 py-0.5 rounded">
-                  Secondary Modality
-                </span>
-              </div>
-            </div>
-          )
-        ) : (
-          /* Single Image Full Canvas */
-          <div className="relative w-full h-full flex items-center justify-center p-2">
-            {currentImg1 ? (
-              <img src={currentImg1} alt="Remote Sensing Image" className="w-full h-full object-contain rounded-lg" />
-            ) : (
-              <p className="text-xs text-slate-500">No image loaded.</p>
-            )}
-            <span className="absolute bottom-3 right-3 bg-slate-900/90 text-slate-300 text-[10px] font-mono px-2.5 py-1 rounded border border-slate-800">
-              {activeLayer.toUpperCase()}
-            </span>
+        {/* Live Coordinate Crosshair HUD */}
+        {coords && settings?.coordinate_crosshair !== false && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 bg-slate-900/90 backdrop-blur border border-cyan-500/40 text-[10px] font-mono px-3 py-1 rounded-full text-cyan-300 flex items-center gap-2 shadow-lg">
+            <Crosshair className="w-3 h-3 text-cyan-400 animate-spin-slow" />
+            <span>Grid: [{coords.x}, {coords.y}]</span>
+            <span className="text-slate-500">|</span>
+            <span className="text-emerald-400">GSD: 2.5m</span>
           </div>
         )}
+
+        {/* Scaled Visual Content Container */}
+        <div
+          className="relative w-full h-full flex items-center justify-center transition-transform duration-150"
+          style={{ transform: `scale(${zoomLevel})` }}
+        >
+          {/* If Paired Observation (Bi-Temporal or Cross-Modal) */}
+          {mode !== 'SINGLE' && currentImg2 ? (
+            viewMode === 'split' ? (
+              /* Split Comparison Slider */
+              <div className="relative w-full h-full select-none overflow-hidden">
+                <img
+                  src={currentImg1}
+                  alt="Primary Modality"
+                  className="absolute inset-0 w-full h-full object-contain"
+                />
+                <div
+                  className="absolute inset-0 overflow-hidden"
+                  style={{ width: `${splitPosition}%` }}
+                >
+                  <img
+                    src={currentImg2}
+                    alt="Secondary Modality"
+                    className="absolute inset-0 w-full h-full object-contain max-w-none"
+                    style={{ width: '100%', height: '100%' }}
+                  />
+                </div>
+
+                {/* Slider Divider Line */}
+                <div
+                  className="absolute top-0 bottom-0 w-1 bg-cyan-400 cursor-ew-resize shadow-2xl z-20 flex items-center justify-center"
+                  style={{ left: `${splitPosition}%` }}
+                >
+                  <div className="w-6 h-6 rounded-full bg-cyan-500 text-slate-950 flex items-center justify-center shadow-lg border-2 border-white text-[10px] font-bold">
+                    ↔
+                  </div>
+                </div>
+
+                {/* Range input controller */}
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={splitPosition}
+                  onChange={(e) => setSplitPosition(Number(e.target.value))}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-ew-resize z-20"
+                />
+
+                {/* Badges */}
+                <span className="absolute top-3 left-3 bg-slate-900/90 text-cyan-300 text-[11px] font-mono font-bold px-2.5 py-1 rounded-md border border-cyan-500/40 z-10">
+                  {mode === 'BITEMPORAL' ? 'T1: Pre-Event' : 'Optical RGB'}
+                </span>
+                <span className="absolute top-3 right-3 bg-slate-900/90 text-indigo-300 text-[11px] font-mono font-bold px-2.5 py-1 rounded-md border border-indigo-500/40 z-10">
+                  {mode === 'BITEMPORAL' ? 'T2: Post-Event' : 'SAR Backscatter'}
+                </span>
+              </div>
+            ) : (
+              /* Side-by-Side Dual View */
+              <div className="grid grid-cols-2 w-full h-full gap-2 p-2">
+                <div className="relative rounded-lg overflow-hidden border border-slate-800 bg-slate-900/50">
+                  <img src={currentImg1} alt="Left" className="w-full h-full object-contain" />
+                  <span className="absolute bottom-2 left-2 bg-slate-900/90 text-cyan-300 text-[10px] font-mono px-2 py-0.5 rounded">
+                    Primary Modality
+                  </span>
+                </div>
+                <div className="relative rounded-lg overflow-hidden border border-slate-800 bg-slate-900/50">
+                  <img src={currentImg2} alt="Right" className="w-full h-full object-contain" />
+                  <span className="absolute bottom-2 right-2 bg-slate-900/90 text-indigo-300 text-[10px] font-mono px-2 py-0.5 rounded">
+                    Secondary Modality
+                  </span>
+                </div>
+              </div>
+            )
+          ) : (
+            /* Single Image Full Canvas */
+            <div className="relative w-full h-full flex items-center justify-center p-2">
+              {currentImg1 ? (
+                <img src={currentImg1} alt="Remote Sensing Image" className="w-full h-full object-contain rounded-lg" />
+              ) : (
+                <p className="text-xs text-slate-500">No image loaded.</p>
+              )}
+              <span className="absolute bottom-3 right-3 bg-slate-900/90 text-slate-300 text-[10px] font-mono px-2.5 py-1 rounded border border-slate-800">
+                {activeLayer.toUpperCase()}
+              </span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Viewer Footer Status & Controls */}

@@ -33,13 +33,16 @@ class SatQueryAgent:
         query: str,
         image_path_1: str or Path,
         image_path_2: Optional[str or Path] = None,
-        pair_mode: Optional[str] = None # 'BITEMPORAL', 'CROSSMODAL', or None
+        pair_mode: Optional[str] = None, # 'BITEMPORAL', 'CROSSMODAL', or None
+        advanced_settings: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Main entrypoint for processing user queries over single or paired remote-sensing imagery.
+        Main entrypoint for processing user queries over single or paired remote-sensing imagery,
+        supporting custom advanced settings (model backbone, thresholds, colormaps, weights).
         """
         session_id = str(uuid.uuid4())[:8]
         trace = ExecutionTrace(session_id, query)
+        settings = advanced_settings or {}
         
         # Step 1: Input Validation & Modality Inspection
         t0 = time.time()
@@ -72,20 +75,27 @@ class SatQueryAgent:
             execution_time_ms=(time.time() - t0) * 1000
         )
         
-        # Step 2: Query Interpretation & Task Classification
+        # Step 2: Query Interpretation & Task Classification (with Forced Tool Override support)
         t1 = time.time()
-        classified_task = self._classify_query_task(query, is_paired, meta1, meta2, pair_mode)
+        forced_tool = settings.get("forced_tool", "AUTO")
+        if forced_tool and forced_tool != "AUTO":
+            classified_task = forced_tool
+            routing_note = f"Task explicitly enforced by Advanced Settings: '{classified_task}'."
+        else:
+            classified_task = self._classify_query_task(query, is_paired, meta1, meta2, pair_mode)
+            routing_note = f"Classified query intent as '{classified_task}'."
+
         trace.add_step(
             "INTENT_ROUTING",
             "SatQueryAgenticRouter",
-            f"Classified query intent as '{classified_task}'.",
-            parameters={"query": query, "target_task": classified_task, "input_mode": pair_mode or ("PAIRED" if is_paired else "SINGLE")},
+            routing_note,
+            parameters={"query": query, "target_task": classified_task, "input_mode": pair_mode or ("PAIRED" if is_paired else "SINGLE"), "forced_tool": forced_tool},
             execution_time_ms=(time.time() - t1) * 1000
         )
         
-        # Step 3: Tool Scheduling & Specialist Execution
+        # Step 3: Tool Scheduling & Specialist Execution with Advanced Settings
         selected_models = []
-        key_parameters = {}
+        key_parameters = {k: v for k, v in settings.items() if v is not None}
         visual_artifacts = {}
         quantitative_metrics = {}
         spatial_grounding = {}
@@ -107,6 +117,14 @@ class SatQueryAgent:
         if "FCC_NIR" in indices:
             visual_artifacts["fcc_nir_b64"] = array_to_base64_png(indices["FCC_NIR"])
             
+        # Parse configurable advanced parameters
+        change_p = float(settings.get("change_percentile", 80.0))
+        change_cmap = str(settings.get("change_colormap", "inferno"))
+        opt_w = float(settings.get("optical_weight", 0.6))
+        sar_w = float(settings.get("sar_weight", 0.4))
+        box_col = str(settings.get("box_color", "gold"))
+        response_style = str(settings.get("response_style", "technical_scientific"))
+
         # ROUTE 1: BITEMPORAL CHANGE UNDERSTANDING & CDVQA
         if classified_task in [TASK_BITEMPORAL_CHANGE, TASK_BITEMPORAL_CDVQA]:
             if not is_paired or arr2 is None:
@@ -115,9 +133,16 @@ class SatQueryAgent:
             else:
                 t_exec = time.time()
                 selected_models.append("RSChangeEngine")
-                key_parameters = {"change_metric": "Change Vector Analysis (CVA)", "threshold": "Adaptive-80th-Percentile"}
+                key_parameters.update({
+                    "change_metric": "Change Vector Analysis (CVA)",
+                    "threshold_percentile": change_p,
+                    "colormap": change_cmap
+                })
                 
-                change_res = self.registry.change_engine.analyze_change(arr1, arr2, query=query, metadata=meta1)
+                change_res = self.registry.change_engine.analyze_change(
+                    arr1, arr2, query=query, metadata=meta1,
+                    change_percentile=change_p, colormap=change_cmap
+                )
                 
                 visual_artifacts["change_heatmap_b64"] = change_res["heatmap_b64"]
                 visual_artifacts["change_mask_b64"] = change_res["change_mask_overlay_b64"]
@@ -135,7 +160,7 @@ class SatQueryAgent:
                 trace.add_step(
                     "SPECIALIST_EXECUTION",
                     "RSChangeEngine",
-                    f"Executed multi-temporal change differencing and CDVQA inference.",
+                    f"Executed multi-temporal change differencing (CVA p={change_p}%, cmap={change_cmap}) and CDVQA inference.",
                     parameters=key_parameters,
                     execution_time_ms=(time.time() - t_exec) * 1000
                 )
@@ -148,9 +173,16 @@ class SatQueryAgent:
             else:
                 t_exec = time.time()
                 selected_models.append("RSOpticalSARFusionEngine")
-                key_parameters = {"fusion_method": "Multi-sensor Feature Fusion (Spectral + Microwave Backscatter)"}
+                key_parameters.update({
+                    "fusion_method": "Multi-sensor Feature Fusion (Spectral + Microwave Backscatter)",
+                    "optical_weight": opt_w,
+                    "sar_weight": sar_w
+                })
                 
-                fusion_res = self.registry.optical_sar_fusion.fuse_and_analyze(arr1, arr2, query=query, metadata=meta1)
+                fusion_res = self.registry.optical_sar_fusion.fuse_and_analyze(
+                    arr1, arr2, query=query, metadata=meta1,
+                    optical_weight=opt_w, sar_weight=sar_w
+                )
                 
                 visual_artifacts["fused_composite_b64"] = fusion_res["fused_composite_b64"]
                 visual_artifacts["thematic_map_b64"] = fusion_res["thematic_map_b64"]
@@ -162,7 +194,7 @@ class SatQueryAgent:
                 trace.add_step(
                     "SPECIALIST_EXECUTION",
                     "RSOpticalSARFusionEngine",
-                    "Executed joint optical-SAR cross-modal reasoning and thematic segmentation.",
+                    f"Executed joint optical-SAR reasoning with custom weights (Opt: {opt_w}, SAR: {sar_w}).",
                     parameters=key_parameters,
                     execution_time_ms=(time.time() - t_exec) * 1000
                 )
@@ -171,9 +203,17 @@ class SatQueryAgent:
         elif classified_task == TASK_SINGLE_GROUNDING:
             t_exec = time.time()
             selected_models.append("RSGroundingEngine")
-            key_parameters = {"grounding_target": query, "iou_threshold": 0.5}
+            key_parameters.update({
+                "grounding_target": query,
+                "box_color": box_col,
+                "iou_threshold": float(settings.get("iou_threshold", 0.5))
+            })
             
-            grounding_res = self.registry.grounding_engine.ground_query(arr1, query, modality=meta1.get("modality", "OPTICAL_RGB"))
+            grounding_res = self.registry.grounding_engine.ground_query(
+                arr1, query,
+                modality=meta1.get("modality", "OPTICAL_RGB"),
+                box_color=box_col
+            )
             
             visual_artifacts["visual_evidence_overlay"] = grounding_res["visual_evidence_overlay"]
             visual_artifacts["binary_mask_b64"] = grounding_res["binary_mask_b64"]
@@ -188,7 +228,7 @@ class SatQueryAgent:
             trace.add_step(
                 "SPECIALIST_EXECUTION",
                 "RSGroundingEngine",
-                f"Located and grounded '{grounding_res['target_entity']}' with {len(grounding_res['detections'])} bounding bounding regions.",
+                f"Located and grounded '{grounding_res['target_entity']}' with {len(grounding_res['detections'])} bounding bounding regions (color: {box_col}).",
                 parameters=key_parameters,
                 execution_time_ms=(time.time() - t_exec) * 1000
             )
@@ -197,7 +237,10 @@ class SatQueryAgent:
         elif classified_task == TASK_SINGLE_CAPTION:
             t_exec = time.time()
             selected_models.append("RSCaptioner")
-            key_parameters = {"description_granularity": "Multi-scale land-cover & infrastructure"}
+            key_parameters.update({
+                "description_granularity": "Multi-scale land-cover & infrastructure",
+                "response_style": response_style
+            })
             
             caption_res = self.registry.captioner.generate_caption(arr1, modality=meta1.get("modality", "OPTICAL_RGB"), metadata=meta1)
             
@@ -217,7 +260,11 @@ class SatQueryAgent:
         else:
             t_exec = time.time()
             selected_models.append("RSVQAEngine")
-            key_parameters = {"vqa_benchmark": "RSVQA/VRSBench Standard", "query": query}
+            key_parameters.update({
+                "vqa_benchmark": "RSVQA/VRSBench Standard",
+                "query": query,
+                "response_style": response_style
+            })
             
             vqa_res = self.registry.vqa_engine.answer_question(arr1, query, modality=meta1.get("modality", "OPTICAL_RGB"), metadata=meta1)
             

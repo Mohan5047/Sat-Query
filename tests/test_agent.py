@@ -61,3 +61,29 @@ def test_optical_sar_fusion_query(agent, sample_paths):
     assert "fused_composite_b64" in res["visual_artifacts"]
     assert "thematic_map_b64" in res["visual_artifacts"]
     assert "built_up_percentage" in res["quantitative_metrics"]["land_cover_percentages"]
+
+def test_forced_tool_override(agent, sample_paths):
+    # Query is conversational description, but forced tool is SINGLE_GROUNDING
+    query = "Give me an overview of this satellite image."
+    adv_settings = {"forced_tool": "SINGLE_GROUNDING", "box_color": "cyan"}
+    res = agent.process_query(query, sample_paths["optical"], advanced_settings=adv_settings)
+    assert res["status"] == "success"
+    assert res["task"] == "SINGLE_GROUNDING"
+    assert "visual_evidence_overlay" in res["visual_artifacts"]
+    assert res["execution_trace"]["key_parameters"]["forced_tool"] == "SINGLE_GROUNDING"
+    assert res["execution_trace"]["key_parameters"]["box_color"] == "cyan"
+
+def test_advanced_settings_parameters(agent, sample_paths):
+    query = "What changed between these dates?"
+    adv_settings = {
+        "change_percentile": 85,
+        "change_colormap": "turbo",
+        "optical_weight": 0.7,
+        "sar_weight": 0.3
+    }
+    res = agent.process_query(query, sample_paths["t1"], sample_paths["t2"], pair_mode="BITEMPORAL", advanced_settings=adv_settings)
+    assert res["status"] == "success"
+    assert res["task"] in ["BITEMPORAL_CHANGE", "BITEMPORAL_CDVQA"]
+    assert res["execution_trace"]["key_parameters"]["threshold_percentile"] == 85
+    assert res["execution_trace"]["key_parameters"]["colormap"] == "turbo"
+

@@ -158,10 +158,11 @@ async def analyze_query(
     sample_image2_path: Optional[str] = Form(None),
     file1: Optional[UploadFile] = File(None),
     file2: Optional[UploadFile] = File(None),
+    advanced_settings: Optional[str] = Form(None)
 ):
     """
     Core agentic analysis endpoint.
-    Accepts uploaded files or sample paths with natural-language text query.
+    Accepts uploaded files or sample paths with natural-language text query and advanced settings.
     """
     img1_path = None
     img2_path = None
@@ -186,13 +187,23 @@ async def analyze_query(
     elif sample_image2_path and Path(sample_image2_path).exists():
         img2_path = Path(sample_image2_path)
         
+    # Parse advanced settings if supplied
+    parsed_settings = {}
+    if advanced_settings:
+        try:
+            import json
+            parsed_settings = json.loads(advanced_settings)
+        except Exception:
+            parsed_settings = {}
+
     # Execute Agentic Analysis Pipeline
     try:
         analysis_result = agent.process_query(
             query=query,
             image_path_1=img1_path,
             image_path_2=img2_path,
-            pair_mode=pair_mode
+            pair_mode=pair_mode,
+            advanced_settings=parsed_settings
         )
         
         session_id = analysis_result.get("execution_trace", {}).get("session_id", str(uuid.uuid4())[:8])

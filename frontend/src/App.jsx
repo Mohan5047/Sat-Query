@@ -7,8 +7,10 @@ import EvidenceViewer from './components/EvidenceViewer';
 import ExecutionTrace from './components/ExecutionTrace';
 import ReportModal from './components/ReportModal';
 import ToolsModal from './components/ToolsModal';
+import AdvancedSettingsModal from './components/AdvancedSettingsModal';
 import { getSamples, getTools, analyzeQuery } from './services/api';
 import { DEFAULT_SAMPLES, DEFAULT_TOOLS } from './data/defaultSamples';
+import { DEFAULT_ADVANCED_SETTINGS, MISSION_PRESETS } from './data/defaultSettings';
 
 export default function App() {
   const [samples, setSamples] = useState(DEFAULT_SAMPLES);
@@ -22,6 +24,16 @@ export default function App() {
   const [file1Preview, setFile1Preview] = useState(DEFAULT_SAMPLES[0]?.image1_preview || null);
   const [file2Preview, setFile2Preview] = useState(DEFAULT_SAMPLES[0]?.image2_preview || null);
 
+  // Advanced Settings State with LocalStorage Persistence
+  const [settings, setSettings] = useState(() => {
+    try {
+      const saved = localStorage.getItem('satquery_advanced_settings');
+      return saved ? JSON.parse(saved) : DEFAULT_ADVANCED_SETTINGS;
+    } catch (e) {
+      return DEFAULT_ADVANCED_SETTINGS;
+    }
+  });
+
   // Analysis & Chat state
   const [chatHistory, setChatHistory] = useState([]);
   const [analysisResult, setAnalysisResult] = useState(null);
@@ -31,6 +43,7 @@ export default function App() {
   // Modal states
   const [isReportOpen, setIsReportOpen] = useState(false);
   const [isToolsOpen, setIsToolsOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // Load backend benchmark samples and tool registry
   useEffect(() => {
@@ -55,6 +68,15 @@ export default function App() {
       })
       .catch((err) => console.log('Using default tool registry:', err));
   }, []);
+
+  const handleUpdateSettings = (newSettings) => {
+    setSettings(newSettings);
+    try {
+      localStorage.setItem('satquery_advanced_settings', JSON.stringify(newSettings));
+    } catch (e) {
+      console.warn('Could not persist settings to localStorage:', e);
+    }
+  };
 
   const handleSelectSample = (sample) => {
     setSelectedSample(sample);
@@ -83,7 +105,8 @@ export default function App() {
         file1: file1 || undefined,
         file2: file2 || undefined,
         activeSamplePreview1: file1Preview,
-        activeSamplePreview2: file2Preview
+        activeSamplePreview2: file2Preview,
+        advancedSettings: settings
       };
 
       const result = await analyzeQuery(payload);
@@ -115,13 +138,17 @@ export default function App() {
     }
   };
 
+  const activePresetBadge = MISSION_PRESETS.find(p => p.id === settings.activePresetId)?.badge || 'Custom';
+
   return (
     <div className="min-h-screen flex flex-col bg-[#070b19]">
       <Header
         onOpenTools={() => setIsToolsOpen(true)}
+        onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenReport={() => setIsReportOpen(true)}
         hasReport={!!currentSessionId}
         sessionId={currentSessionId}
+        activePresetBadge={activePresetBadge}
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 space-y-6">
@@ -151,6 +178,7 @@ export default function App() {
               image2Preview={file2Preview}
               analysisResult={analysisResult}
               isLoading={isLoading}
+              settings={settings}
             />
           </div>
           <div className="lg:col-span-5">
@@ -186,6 +214,13 @@ export default function App() {
         isOpen={isToolsOpen}
         onClose={() => setIsToolsOpen(false)}
         tools={tools}
+      />
+
+      <AdvancedSettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        settings={settings}
+        onUpdateSettings={handleUpdateSettings}
       />
     </div>
   );

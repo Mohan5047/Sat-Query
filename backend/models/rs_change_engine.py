@@ -20,9 +20,17 @@ class RSChangeEngine:
     def __init__(self):
         pass
 
-    def analyze_change(self, t1_arr: np.ndarray, t2_arr: np.ndarray, query: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def analyze_change(
+        self,
+        t1_arr: np.ndarray,
+        t2_arr: np.ndarray,
+        query: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        change_percentile: float = 80.0,
+        colormap: str = "inferno"
+    ) -> Dict[str, Any]:
         """
-        Main bi-temporal change analysis workflow.
+        Main bi-temporal change analysis workflow with configurable CVA sensitivity and colormap.
         """
         # Ensure dimensions match
         h1, w1 = t1_arr.shape[:2]
@@ -41,17 +49,19 @@ class RSChangeEngine:
         diff_float = np.abs(t2_rgb.astype(np.float32) - t1_rgb.astype(np.float32))
         change_magnitude = np.sqrt(np.sum(diff_float ** 2, axis=-1)) / np.sqrt(3 * (255.0**2))
         
-        # Threshold for binary change mask (Otsu-style adaptive threshold)
-        p80 = np.percentile(change_magnitude, 80)
-        thresh = max(0.18, float(p80))
+        # Threshold for binary change mask with user-configured percentile
+        clamped_p = min(max(float(change_percentile), 50.0), 98.0)
+        p_val = np.percentile(change_magnitude, clamped_p)
+        thresh = max(0.12, float(p_val))
         binary_mask = (change_magnitude > thresh).astype(np.uint8)
         
         total_pixels = target_h * target_w
         changed_pixels = int(np.sum(binary_mask))
         change_percentage = round(float((changed_pixels / total_pixels) * 100), 2)
         
-        # Generate spatial change heatmap (Jet/Inferno colormap)
-        heatmap_rgba = cm.inferno(change_magnitude) # (H, W, 4) in [0, 1]
+        # Generate spatial change heatmap with selected colormap
+        cmap_func = getattr(cm, colormap.lower(), cm.inferno)
+        heatmap_rgba = cmap_func(change_magnitude) # (H, W, 4) in [0, 1]
         heatmap_rgb = (heatmap_rgba[:, :, :3] * 255).astype(np.uint8)
         heatmap_b64 = array_to_base64_png(heatmap_rgb)
         

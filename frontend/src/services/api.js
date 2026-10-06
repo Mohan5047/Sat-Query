@@ -54,7 +54,8 @@ export const analyzeQuery = async ({
   file1,
   file2,
   activeSamplePreview1,
-  activeSamplePreview2
+  activeSamplePreview2,
+  advancedSettings
 }) => {
   try {
     const formData = new FormData();
@@ -64,6 +65,7 @@ export const analyzeQuery = async ({
     if (sampleImage2Path) formData.append('sample_image2_path', sampleImage2Path);
     if (file1) formData.append('file1', file1);
     if (file2) formData.append('file2', file2);
+    if (advancedSettings) formData.append('advanced_settings', JSON.stringify(advancedSettings));
 
     const res = await fetch(`${API_BASE_URL}/analyze`, {
       method: 'POST',
@@ -78,11 +80,11 @@ export const analyzeQuery = async ({
   }
 
   // Client-side fallback analysis simulation
-  return generateClientSimulationResponse(query, pairMode, activeSamplePreview1, activeSamplePreview2);
+  return generateClientSimulationResponse(query, pairMode, activeSamplePreview1, activeSamplePreview2, advancedSettings);
 };
 
 // Client-side simulation generator
-function generateClientSimulationResponse(query, pairMode, preview1, preview2) {
+function generateClientSimulationResponse(query, pairMode, preview1, preview2, advancedSettings = {}) {
   const qLower = query.toLowerCase();
   const sessionId = Math.random().toString(36).substring(2, 10);
   const nowMs = 120 + Math.floor(Math.random() * 80);

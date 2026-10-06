@@ -21,9 +21,9 @@ class RSGroundingEngine:
     def __init__(self):
         pass
 
-    def ground_query(self, img_array: np.ndarray, query: str, modality: str = "OPTICAL_RGB") -> Dict[str, Any]:
+    def ground_query(self, img_array: np.ndarray, query: str, modality: str = "OPTICAL_RGB", box_color: str = "gold") -> Dict[str, Any]:
         """
-        Grounds the natural language query into bounding boxes and spatial masks.
+        Grounds the natural language query into bounding boxes and spatial masks with configurable styling.
         """
         q_lower = query.lower().strip()
         h, w = img_array.shape[:2]
@@ -35,7 +35,7 @@ class RSGroundingEngine:
         mask, detections = self._detect_regions(img_array, category_type, h, w)
         
         # Create visual overlay image with highlighted boundaries and bounding boxes
-        overlay_b64 = self._create_overlay(img_array, detections, mask, target_name)
+        overlay_b64 = self._create_overlay(img_array, detections, mask, target_name, box_color=box_color)
         mask_b64 = array_to_base64_png((mask * 255).astype(np.uint8))
         
         total_grounded_area_pct = round(float(np.sum(mask) / (h * w) * 100), 2)
@@ -144,7 +144,7 @@ class RSGroundingEngine:
             
         return mask, detections
 
-    def _create_overlay(self, img: np.ndarray, detections: List[Dict[str, Any]], mask: np.ndarray, label: str) -> str:
+    def _create_overlay(self, img: np.ndarray, detections: List[Dict[str, Any]], mask: np.ndarray, label: str, box_color: str = "gold") -> str:
         # Create RGB base
         if img.ndim == 2:
             base_rgb = np.stack([img, img, img], axis=-1)
@@ -155,29 +155,32 @@ class RSGroundingEngine:
             
         pil_img = Image.fromarray(base_rgb.astype(np.uint8)).convert("RGBA")
         
-        # Highlight mask overlay with semi-transparent cyan/green
-        mask_overlay = Image.new("RGBA", pil_img.size, (0, 0, 0, 0))
-        mask_draw = ImageDraw.Draw(mask_overlay)
-        
-        # Color highlight
+        # Color palette mapping
+        palette = {
+            "gold": ((255, 215, 0), [0, 220, 255, 100]),
+            "cyan": ((0, 245, 212), [0, 245, 212, 100]),
+            "emerald": ((6, 214, 160), [6, 214, 160, 100]),
+            "crimson": ((239, 35, 60), [239, 35, 60, 100])
+        }
+        outline_rgb, mask_fill = palette.get(box_color.lower(), palette["gold"])
+
+        # Highlight mask overlay with semi-transparent color
         overlay_arr = np.zeros((img.shape[0], img.shape[1], 4), dtype=np.uint8)
-        # Cyan-blue highlight for mask
-        overlay_arr[mask > 0] = [0, 220, 255, 100]
+        overlay_arr[mask > 0] = mask_fill
         mask_overlay = Image.fromarray(overlay_arr, mode="RGBA")
         
         combined = Image.alpha_composite(pil_img, mask_overlay).convert("RGB")
         draw = ImageDraw.Draw(combined)
         
-        # Draw bounding boxes
+        # Draw bounding boxes with selected styling
         for det in detections:
             x1, y1, x2, y2 = det["bbox"]
-            # Bright yellow/cyan bounding box outline
             for thickness in range(3):
-                draw.rectangle([x1 - thickness, y1 - thickness, x2 + thickness, y2 + thickness], outline=(255, 215, 0))
+                draw.rectangle([x1 - thickness, y1 - thickness, x2 + thickness, y2 + thickness], outline=outline_rgb)
             
             # Label tag
             tag = f"{label.split('/')[0].strip()} [{int(det['confidence']*100)}%]"
-            draw.rectangle([x1, max(0, y1 - 18), x1 + len(tag) * 7 + 8, y1], fill=(255, 215, 0))
+            draw.rectangle([x1, max(0, y1 - 18), x1 + len(tag) * 7 + 8, y1], fill=outline_rgb)
             draw.text((x1 + 4, max(0, y1 - 16)), tag, fill=(0, 0, 0))
             
         return array_to_base64_png(np.array(combined))

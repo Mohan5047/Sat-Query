@@ -20,9 +20,18 @@ class RSOpticalSARFusionEngine:
     def __init__(self):
         pass
 
-    def fuse_and_analyze(self, optical_arr: np.ndarray, sar_arr: np.ndarray, query: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def fuse_and_analyze(
+        self,
+        optical_arr: np.ndarray,
+        sar_arr: np.ndarray,
+        query: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        optical_weight: float = 0.6,
+        sar_weight: float = 0.4,
+        sar_bright_thresh_p: float = 75.0
+    ) -> Dict[str, Any]:
         """
-        Executes joint optical-SAR cross-modal analysis.
+        Executes joint optical-SAR cross-modal analysis with configurable fusion ratio and radar sensitivity.
         """
         h1, w1 = optical_arr.shape[:2]
         h2, w2 = sar_arr.shape[:2]
@@ -46,7 +55,8 @@ class RSOpticalSARFusionEngine:
         b = opt_rgb[:, :, 2].astype(np.float32) / 255.0
         
         # Built-up mask: High SAR backscatter (double-bounce) + optical gray/moderate reflectance
-        sar_bright_thresh = np.percentile(sar_norm, 75)
+        clamped_bright_p = min(max(float(sar_bright_thresh_p), 50.0), 95.0)
+        sar_bright_thresh = np.percentile(sar_norm, clamped_bright_p)
         built_up_joint_mask = (sar_norm > sar_bright_thresh) | ((np.abs(r - g) < 0.12) & (sar_norm > 0.45))
         
         # Water mask: Low SAR backscatter (specular) + high optical blue absorption / dark tone
@@ -62,11 +72,16 @@ class RSOpticalSARFusionEngine:
         p_veg = round(float(np.sum(veg_joint_mask) / total_px * 100), 2)
         p_other = max(0.0, round(100.0 - (p_built_up + p_water + p_veg), 2))
         
-        # 2. Generate Cross-Modal Fused Composite Image
-        # Fuse Optical RGB with SAR texture (SAR replaces luminance / detail channel in HSV or weighted overlay)
+        # 2. Generate Cross-Modal Fused Composite Image with configurable optical/SAR weights
+        w_opt = max(0.0, float(optical_weight))
+        w_sar = max(0.0, float(sar_weight))
+        total_w = w_opt + w_sar if (w_opt + w_sar) > 0 else 1.0
+        norm_w_opt = w_opt / total_w
+        norm_w_sar = w_sar / total_w
+
         fused_rgb = opt_rgb.copy().astype(np.float32)
-        # Modulate optical brightness with SAR backscatter structure
-        fused_rgb = 0.6 * fused_rgb + 0.4 * (sar_norm[:, :, None] * 255.0)
+        # Modulate optical brightness with SAR backscatter structure according to weights
+        fused_rgb = norm_w_opt * fused_rgb + norm_w_sar * (sar_norm[:, :, None] * 255.0)
         fused_rgb = np.clip(fused_rgb, 0, 255).astype(np.uint8)
         fused_b64 = array_to_base64_png(fused_rgb)
         
