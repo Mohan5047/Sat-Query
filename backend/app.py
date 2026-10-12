@@ -249,9 +249,14 @@ def download_json_report(session_id: str):
     )
 
 # Mount compiled React frontend if exists
-frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
-if frontend_dist.exists():
-    app.mount("/assets", StaticFiles(directory=str(frontend_dist / "assets")), name="assets")
+repo_root = Path(__file__).resolve().parent.parent
+frontend_dist = repo_root / "frontend" / "dist"
+if not (frontend_dist / "index.html").exists() and (repo_root / "index.html").exists():
+    frontend_dist = repo_root
+
+if (frontend_dist / "index.html").exists():
+    if (frontend_dist / "assets").exists():
+        app.mount("/assets", StaticFiles(directory=str(frontend_dist / "assets")), name="assets")
 
     @app.get("/{full_path:path}")
     def serve_frontend(full_path: str):
